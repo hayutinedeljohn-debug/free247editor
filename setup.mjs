@@ -4,7 +4,7 @@
 //
 //   node setup.mjs
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -44,11 +44,16 @@ if (missing.length) {
 console.log(`Node ${process.versions.node}, Git, FFmpeg: OK`);
 
 step('Installing the editing engine (Herk Edit Kit) into kit/');
-if (!existsSync(join(kit, '.git'))) {
+// The kit counts as installed only once its files are checked out. A download that stopped
+// halfway (a .git folder and nothing else) is cleared and fetched again.
+if (!existsSync(join(kit, 'package.json'))) {
+  rmSync(kit, { recursive: true, force: true });
   if (!run('git', ['clone', '--quiet', '--no-checkout', '--depth', '1', '--filter=blob:limit=1m', KIT_REPO, kit])) {
     fail('could not download Herk Edit Kit. Check your internet connection and run setup again.');
   }
-  run('git', ['-C', kit, 'fetch', '--quiet', '--depth', '1', '--filter=blob:limit=1m', 'origin', KIT_COMMIT]);
+  if (!run('git', ['-C', kit, 'fetch', '--quiet', '--depth', '1', '--filter=blob:limit=1m', 'origin', KIT_COMMIT])) {
+    fail(`could not download kit commit ${KIT_COMMIT}. Check your internet connection and run setup again.`);
+  }
   run('git', ['-C', kit, 'sparse-checkout', 'set', '--no-cone', ...SPARSE]);
   if (!run('git', ['-C', kit, '-c', 'advice.detachedHead=false', 'checkout', '--quiet', KIT_COMMIT])) {
     fail(`could not check out kit commit ${KIT_COMMIT}.`);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { guidedFile, styleFile } from './style.mjs';
+import { guidedFile, languageOf, styleFile } from './style.mjs';
 
 const meta = (text) => Object.fromEntries(text.split('---')[1].trim().split('\n').map((l) => l.split(': ')));
 
@@ -36,6 +36,13 @@ test('a Guided template keeps every pick in the front matter and says it in sent
   assert.match(text, /TikTok safe zone/);
   assert.match(text, /question card/);
   assert.match(text, /follow card/);
+});
+
+test('the picked language is read back for transcription; a Guided template names none', () => {
+  assert.equal(languageOf(styleFile({ lang: 'taglish' })), 'tl');
+  assert.equal(languageOf(styleFile({ lang: 'english' })), 'en');
+  assert.equal(languageOf(styleFile({ lang: 'bisaya' })), 'auto');
+  assert.equal(languageOf(guidedFile('Style ko 1')), null);
 });
 
 test('skipping every question still gives a usable default', () => {

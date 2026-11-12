@@ -93,6 +93,9 @@ export function styleFile(a = {}) {
   return render(meta, lines);
 }
 
+// The spoken-language code a style file asks transcription to use, or null when it names none.
+export const languageOf = (text) => /^transcribe_language:\s*(\S+)/m.exec(String(text || ''))?.[1] ?? null;
+
 const render = (meta, lines) => `---\n${Object.entries(meta).map(([k, v]) => `${k}: ${v}`).join('\n')}\n---\n${lines.join('\n')}\n`;
 
 const FONTS = { anton: 'Anton', bebas: 'Bebas Neue', montserrat: 'Montserrat ExtraBold', poppins: 'Poppins Bold', archivo: 'Archivo Black' };

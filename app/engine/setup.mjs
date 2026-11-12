@@ -20,8 +20,14 @@ const MINGIT = {
 const CODEX_VERSION = '0.164.0';
 
 export const TEST_VIDEO = join(WORK, 'outbox', 'setup-test.mp4');
-// What the engine (Claude Code or Codex) reads in work\, copied from the app's own files.
-const WORKSPACE = ['AGENTS.md', 'CLAUDE.md', 'setup.mjs', '.env.example', 'tools', '.agents', join('.claude', 'skills')];
+// What the engine (Claude Code or Codex) reads in work\, copied from the app's own files. Listed
+// one by one, matching tauri.conf.json's resources, so personal skills or tools in a developer's
+// checkout never reach a buyer.
+const WORKSPACE = [
+  'AGENTS.md', 'CLAUDE.md', 'setup.mjs', '.env.example',
+  join('tools', 'transcribe.mjs'), join('tools', 'transcribe_local.py'),
+  join('.agents', 'skills', 'free247editor'), join('.claude', 'skills', 'free247editor'),
+];
 const TAR = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
 
 // Claude Code and Codex come early (they are small), so sign-in is ready by the last question.

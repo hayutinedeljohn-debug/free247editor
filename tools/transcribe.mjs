@@ -2,8 +2,10 @@
 // Free word-level transcription in the format Herk Edit Kit's cutting tools expect:
 // { text, audio_duration_secs, words: [{ text, start, end }] }, written beside the video.
 //
-//   node tools/transcribe.mjs <video> [--local] [--model large-v3]
+//   node tools/transcribe.mjs <video> [--local] [--model large-v3] [--language tl]
 //
+// --language: the ISO code of what is spoken (tl for Tagalog and Taglish, en, ...). Default auto,
+// where Whisper guesses from the opening seconds and can mishear a Taglish clip as English.
 // Default: Groq whisper-large-v3 (free key from console.groq.com, GROQ_API_KEY in .env).
 // --local: faster-whisper on this computer (needs Python and `pip install faster-whisper`).
 import { spawnSync } from 'node:child_process';
@@ -15,11 +17,15 @@ import { parseArgs } from 'node:util';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const { values: opts, positionals: [video] } = parseArgs({
   allowPositionals: true,
-  options: { local: { type: 'boolean' }, model: { type: 'string', default: 'large-v3' } },
+  options: {
+    local: { type: 'boolean' },
+    model: { type: 'string', default: 'large-v3' },
+    language: { type: 'string', default: 'auto' },
+  },
 });
-const { local, model } = opts;
+const { local, model, language } = opts;
 if (!video || !existsSync(video)) {
-  console.error('Usage: node tools/transcribe.mjs <video> [--local] [--model large-v3]');
+  console.error('Usage: node tools/transcribe.mjs <video> [--local] [--model large-v3] [--language tl]');
   process.exit(1);
 }
 try { process.loadEnvFile(join(root, '.env')); } catch {}
@@ -36,7 +42,7 @@ const duration = Number(run('ffprobe', ['-v', 'error', '-show_entries', 'format=
 
 let words;
 if (local) {
-  const json = run('python', [join(root, 'tools', 'transcribe_local.py'), resolve(video), model]);
+  const json = run('python', [join(root, 'tools', 'transcribe_local.py'), resolve(video), model, language]);
   words = JSON.parse(json);
 } else {
   if (!process.env.GROQ_API_KEY) {
@@ -52,6 +58,7 @@ if (local) {
   form.append('model', 'whisper-large-v3');
   form.append('response_format', 'verbose_json');
   form.append('timestamp_granularities[]', 'word');
+  if (language !== 'auto') form.append('language', language);
   const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },

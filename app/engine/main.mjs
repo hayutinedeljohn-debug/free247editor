@@ -5,7 +5,7 @@
 //
 //   node app/engine/main.mjs --selftest
 import { spawn } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, appendFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, appendFileSync } from 'node:fs';
 import { copyFile } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -15,7 +15,7 @@ import { CODEX_JS, DEV, ENGINE, HOME, NPM_CLI, SOURCE, TOOLS, TRANSCRIBE_PROVIDE
 import { setup, STEPS, TEST_VIDEO, syncWorkspace } from './setup.mjs';
 import { toSrt, writeSrt } from './srt.mjs';
 import { stepOf } from './steps.mjs';
-import { guidedFile, styleFile } from './style.mjs';
+import { guidedFile, languageOf, styleFile } from './style.mjs';
 
 const VERSION = '0.1.0';
 const JOBS = join(HOME, 'jobs');
@@ -157,9 +157,20 @@ const GROQ_ERRORS = [
   [/No words/, 'No speech was heard in the video.', 'noWords'],
 ];
 
+// The language the buyer picked at first run. A Guided template names none, so it falls back to
+// Default's; with neither, Whisper guesses ('auto').
+function transcribeLanguage(template = 'default') {
+  for (const t of [template, 'default']) {
+    const file = join(WORK, 'templates', t, 'style.md');
+    const lang = existsSync(file) && languageOf(readFileSync(file, 'utf8'));
+    if (lang) return lang;
+  }
+  return 'auto';
+}
+
 // tools/transcribe.mjs writes <name>.json beside the media file: { text, audio_duration_secs, words }.
-async function transcribe(media, job, env) {
-  const r = await run(process.execPath, [join(WORK, 'tools', 'transcribe.mjs'), media], { cwd: WORK, job, env });
+async function transcribe(media, job, env, language = 'auto') {
+  const r = await run(process.execPath, [join(WORK, 'tools', 'transcribe.mjs'), media, '--language', language], { cwd: WORK, job, env });
   if (r.code === 0) return JSON.parse(readFileSync(media.replace(/\.[^.\\/]+$/, '.json'), 'utf8'));
   if (job?.cancelled) throw fail('Cancelled.', 'cancelled');
   const text = `${r.err}\n${r.out}`;
@@ -249,8 +260,8 @@ function findDraft(slug, version, text, since) {
 }
 
 // SRT timing comes from the final cut itself, so it always lines up.
-async function makeSrt(mp4, job) {
-  await transcribe(mp4, job);
+async function makeSrt(mp4, job, template) {
+  await transcribe(mp4, job, undefined, transcribeLanguage(template));
   writeSrt(mp4.replace(/\.mp4$/, '.json'), mp4.replace(/\.mp4$/, '.srt'));
 }
 
@@ -263,7 +274,7 @@ const BRIEF_END =
 const MODELS = { fast: 'sonnet' };
 
 // Copies the dropped file into work\inbox under a fresh slug and transcribes it.
-async function intake(path, job, progress) {
+async function intake(path, job, progress, template = 'default') {
   if (!VIDEO.test(String(path)) || !existsSync(path)) throw fail(`${basename(String(path))} isn't a video. Use MP4, MOV, MKV or WEBM.`, 'notVideo');
   const ext = extname(path).toLowerCase();
   const base = slugify(basename(path));
@@ -275,7 +286,7 @@ async function intake(path, job, progress) {
   const src = join('inbox', `${slug}${ext}`);
   await copyFile(path, join(WORK, src));
   progress({ step: 'transcribe', line: `Transcribing (${P})` });
-  const { words } = await transcribe(join(WORK, src), job);
+  const { words } = await transcribe(join(WORK, src), job, undefined, transcribeLanguage(template));
   progress({ step: 'transcribe', line: `${words.length} words transcribed` });
   return { slug, src, words };
 }
@@ -305,7 +316,7 @@ async function editVideo({ path, prepared, engine, speed, template = 'default' }
   try {
     // A clip that went through Guided is already copied and transcribed.
     const ready = prepared && /^[a-z0-9-]+$/.test(prepared.slug) && existsSync(join(WORK, 'inbox', `${prepared.slug}.json`));
-    const { slug, src } = ready ? prepared : await intake(path, job, progress);
+    const { slug, src } = ready ? prepared : await intake(path, job, progress, template);
     path = ready ? prepared.name : path;
     const draftName = `outbox/${slug}-v1.mp4`;
     const brief =
@@ -317,7 +328,7 @@ async function editVideo({ path, prepared, engine, speed, template = 'default' }
     const out = await runEngine(engine, { brief, speed, job, progress });
     const mp4 = findDraft(slug, 1, out.text, started);
     progress({ step: 'srt', line: 'Making the SRT from the draft' });
-    await makeSrt(mp4, job);
+    await makeSrt(mp4, job, template);
     const rec = { slug, name: basename(path), engine, template, session: out.session, versions: [1], current: 1 };
     return { job: saveJob({ ...rec, summary: out.text, created: new Date().toISOString() }) };
   } finally {
@@ -366,7 +377,7 @@ async function note({ slug, text = '', chips = [], rule = false, lang = 'en', sp
     const out = await runEngine(rec.engine, { brief, resume: rec.session, speed, job, progress });
     const mp4 = findDraft(slug, next, out.text, started);
     progress({ step: 'srt', line: 'Making the SRT from the draft' });
-    await makeSrt(mp4, job);
+    await makeSrt(mp4, job, rec.template);
     const notes = { ...(rec.notes || {}), [next]: said.join(', ') };
     const times = { ...(rec.times || {}), [next]: new Date().toISOString() };
     return { job: saveJob({ ...rec, session: out.session || rec.session, versions: [...rec.versions, next], current: next, notes, times, summary: out.text }), rule: saved };
@@ -382,9 +393,11 @@ function use({ slug, version }) {
 }
 
 // The export preset: 1080x1920 (padded if the draft is another size), 30 fps, H.264 (NVENC when
-// the GPU has it) + AAC, loudness normalized to about -14 LUFS, in one FFmpeg pass.
+// the GPU has it) + AAC, loudness normalized to about -14 LUFS, in one FFmpeg pass. It writes a
+// .part file and renames it only on success, so a cancel or a failure never touches an earlier final.
 async function exportFinal(src, dst, job) {
   const ffmpeg = join(TOOLS, 'ffmpeg', 'bin', 'ffmpeg.exe');
+  const part = dst.replace(/\.mp4$/i, '.part.mp4');
   const common = [
     '-y', '-hide_banner', '-loglevel', 'error', '-i', src, '-map', '0:v:0', '-map', '0:a:0?',
     '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,format=yuv420p',
@@ -393,12 +406,16 @@ async function exportFinal(src, dst, job) {
   const nvenc = ['-c:v', 'h264_nvenc', '-preset', 'p5', '-rc', 'vbr', '-cq', '21', '-b:v', '0', '-profile:v', 'high'];
   const x264 = ['-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-profile:v', 'high'];
   let encoder = 'h264_nvenc';
-  let r = await run(ffmpeg, [...common, ...nvenc, dst], { job });
+  let r = await run(ffmpeg, [...common, ...nvenc, part], { job });
   if (r.code !== 0 && !job.cancelled) {
     encoder = 'libx264';
-    r = await run(ffmpeg, [...common, ...x264, dst], { job });
+    r = await run(ffmpeg, [...common, ...x264, part], { job });
   }
-  if (r.code !== 0) throw job.cancelled ? fail('Cancelled.', 'cancelled') : fail(`Could not export the final: ${lastLine(r.err)}`);
+  if (r.code !== 0) {
+    rmSync(part, { force: true });
+    throw job.cancelled ? fail('Cancelled.', 'cancelled') : fail(`Could not export the final: ${lastLine(r.err)}`);
+  }
+  renameSync(part, dst);
   return encoder;
 }
 

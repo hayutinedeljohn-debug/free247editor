@@ -40,9 +40,10 @@
       "../../CLAUDE.md": "workspace/CLAUDE.md",
       "../../setup.mjs": "workspace/setup.mjs",
       "../../.env.example": "workspace/.env.example",
-      "../../tools/": "workspace/tools/",
-      "../../.agents/": "workspace/.agents/",
-      "../../.claude/skills/": "workspace/.claude/skills/"
+      "../../tools/transcribe.mjs": "workspace/tools/transcribe.mjs",
+      "../../tools/transcribe_local.py": "workspace/tools/transcribe_local.py",
+      "../../.agents/skills/free247editor/": "workspace/.agents/skills/free247editor/",
+      "../../.claude/skills/free247editor/": "workspace/.claude/skills/free247editor/"
     },
     "icon": [
       "icons/32x32.png",
